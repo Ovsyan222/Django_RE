@@ -3,7 +3,10 @@ from django.contrib import auth, messages
 from django.http import HttpResponseRedirect
 from django.shortcuts import render, redirect
 from django.urls import reverse
+from django.db.models import Prefetch
 
+from orders.models import Order, OrderItem
+from carts.models import Cart
 from users.forms import UserLoginForm, UserRegistrationForm, ProfileForm
 
 def login(request):
@@ -13,9 +16,15 @@ def login(request):
             username = request.POST['username']
             password = request.POST['password']
             user = auth.authenticate(username=username, password=password)
+
+            session_key = request.session.session_key
+
             if user:
                 auth.login(request, user)
                 messages.success(request, f"{username}, Вы вошли в аккаунт")
+
+                if session_key:
+                    Cart.objects.filter(session_key=session_key).update(user=user)
 
                 redirect_page = request.POST.get('next', None)
                 if redirect_page and redirect_page != reverse('user:logout'):
@@ -40,6 +49,11 @@ def registration(request):
             form.save()
             user = form.instance
             auth.login(request, user)
+
+            session_key = request.session.session_key
+
+            if session_key:
+                Cart.objects.filter(session_key=session_key).update(user=user)
             messages.success(request, f"{user.username}, Вы успешно зарегестрированы и вошли в аккаунт")
             return HttpResponseRedirect(reverse('main:index'))
             
@@ -63,9 +77,17 @@ def profile(request):
     else:
         form = ProfileForm(instance=request.user)
 
+    orders = Order.objects.filter(user=request.user).prefetch_related(
+                Prefetch(
+                    "orderitem_set",
+                    queryset=OrderItem.objects.select_related("product"),
+                )
+            ).order_by("-id")
+
     context = {
         'title': 'RE - Кабинет',
-        'form': form
+        'form': form,
+        'orders': orders
     }
     return render(request, 'users/profile.html', context)
 
